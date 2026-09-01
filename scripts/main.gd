@@ -1,5 +1,7 @@
 extends Control
 
+const SkeletonMapperClass = preload("res://scripts/retarget/skeleton_mapper.gd")
+
 const PANEL_COLOR := Color("151b29")
 const ACCENT := Color("65a8ff")
 const DATA_DIR := "user://processing"
@@ -11,6 +13,14 @@ var video_slider: HSlider
 var keyframe_list: ItemList
 var video_preview: TextureRect
 var video_placeholder: Label
+var model_viewport: SubViewport
+var model_status: Label
+var model_dialog: FileDialog
+var model_camera: Camera3D
+var camera_target := Vector3.ZERO
+var camera_distance := 3.0
+var camera_yaw := 0.0
+var camera_pitch := 0.0
 var source_path := ""
 var frame_index := 0
 var frame_rate := 30.0
@@ -53,9 +63,15 @@ func _build_ui() -> void:
 	file_dialog = FileDialog.new()
 	file_dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
 	file_dialog.access = FileDialog.ACCESS_FILESYSTEM
-	file_dialog.filters = PackedStringArray(["*.mp4, *.mov, *.avi, *.webm, *.ogv ; Video files", "*.* ; All files"])
+	file_dialog.filters = PackedStringArray(["*.mp4 ; MP4 video files"])
 	file_dialog.file_selected.connect(_on_video_selected)
 	add_child(file_dialog)
+	model_dialog = FileDialog.new()
+	model_dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
+	model_dialog.access = FileDialog.ACCESS_FILESYSTEM
+	model_dialog.filters = PackedStringArray(["*.glb ; GLB 3D models"])
+	model_dialog.file_selected.connect(_on_model_selected)
+	add_child(model_dialog)
 
 func _make_video_panel() -> Control:
 	var panel := _panel()
@@ -107,17 +123,56 @@ func _make_model_panel() -> Control:
 	panel.size_flags_stretch_ratio = 38.0
 	var root := _column(panel)
 	root.add_child(_heading("3D MODEL / ANIMATION"))
-	var preview := ColorRect.new()
-	preview.color = Color("090d15")
-	preview.custom_minimum_size = Vector2(0, 0)
-	preview.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	var text := Label.new()
-	text.text = "STAR NEUTRAL PREVIEW\n\nLoad a humanoid GLB to preview retargeted motion"
-	text.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	text.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	text.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	preview.add_child(text)
-	root.add_child(preview)
+	var viewport_wrapper := Control.new()
+	viewport_wrapper.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	viewport_wrapper.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	var preview := SubViewportContainer.new()
+	preview.stretch = true
+	preview.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	preview.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	viewport_wrapper.add_child(preview)
+	var input_layer := Control.new()
+	input_layer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	input_layer.mouse_filter = Control.MOUSE_FILTER_STOP
+	input_layer.z_index = 10
+	input_layer.gui_input.connect(_on_viewport_input)
+	viewport_wrapper.add_child(input_layer)
+	model_viewport = SubViewport.new()
+	model_viewport.size = Vector2i(800, 600)
+	model_viewport.handle_input_locally = false
+	model_viewport.transparent_bg = false
+	model_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	preview.add_child(model_viewport)
+	var world := Node3D.new()
+	world.name = "PreviewWorld"
+	model_viewport.add_child(world)
+	var camera := Camera3D.new()
+	camera.name = "PreviewCamera"
+	camera.position = Vector3(0, 1.2, 4.0)
+	camera.current = true
+	camera.look_at_from_position(camera.position, Vector3(0, 1.0, 0))
+	world.add_child(camera)
+	model_camera = camera
+	var light := DirectionalLight3D.new()
+	light.name = "PreviewLight"
+	light.rotation_degrees = Vector3(-35, -25, 0)
+	light.light_energy = 1.5
+	world.add_child(light)
+	var environment := WorldEnvironment.new()
+	environment.environment = Environment.new()
+	environment.environment.background_mode = Environment.BG_COLOR
+	environment.environment.background_color = Color("090d15")
+	environment.environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	environment.environment.ambient_light_color = Color("b9c9e8")
+	environment.environment.ambient_light_energy = 0.7
+	world.add_child(environment)
+	model_status = Label.new()
+	model_status.text = "STAR NEUTRAL PREVIEW\n\nLoad a humanoid GLB to preview retargeted motion"
+	model_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	model_status.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	model_status.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	preview.add_child(model_status)
+	root.add_child(viewport_wrapper)
 	var controls := VBoxContainer.new()
 	root.add_child(controls)
 	_add_button(controls, "Play Animation", _play_animation)
@@ -158,9 +213,9 @@ func _column(parent: Control) -> VBoxContainer:
 	parent.add_child(root)
 	return root
 
-func _heading(text: String) -> Label:
+func _heading(title: String) -> Label:
 	var label := Label.new()
-	label.text = text
+	label.text = title
 	label.add_theme_font_size_override("font_size", 18)
 	label.add_theme_color_override("font_color", ACCENT)
 	return label
@@ -279,8 +334,108 @@ func _process_keyframes() -> void:
 	else:
 		_set_status("Procesamiento iniciado para %d keyframe(s)." % keyframes.size())
 
+func _on_viewport_input(event: InputEvent) -> void:
+	if model_camera == null:
+		return
+	if event is InputEventMouseButton:
+		if event.button_index == MOUSE_BUTTON_WHEEL_UP and event.pressed:
+			camera_distance = maxf(camera_distance * 0.85, 0.15)
+			_update_model_camera()
+			accept_event()
+		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN and event.pressed:
+			camera_distance = minf(camera_distance * 1.18, 100.0)
+			_update_model_camera()
+			accept_event()
+	elif event is InputEventMouseMotion:
+		if event.button_mask & MOUSE_BUTTON_MASK_LEFT:
+			# Horizontal rotation is intentionally inverted.
+			camera_yaw -= event.relative.x * 0.01
+			camera_pitch = clampf(camera_pitch - event.relative.y * 0.01, -1.45, 1.45)
+			_update_model_camera()
+			accept_event()
+		elif event.button_mask & MOUSE_BUTTON_MASK_MIDDLE:
+			camera_target += Vector3(-event.relative.x, event.relative.y, 0.0) * camera_distance * 0.0015
+			_update_model_camera()
+			accept_event()
+
+func _update_model_camera() -> void:
+	if model_camera == null:
+		return
+	var orbit := Vector3(
+		 sin(camera_yaw) * cos(camera_pitch),
+		 sin(camera_pitch),
+		 cos(camera_yaw) * cos(camera_pitch)
+	) * camera_distance
+	model_camera.position = camera_target + orbit
+	model_camera.look_at(camera_target, Vector3.UP)
+
 func _load_model() -> void:
-	_set_status("Carga de GLB preparada; el importador de Skeleton3D se implementará en el siguiente paso.")
+	model_dialog.popup_centered_ratio(0.75)
+
+func _on_model_selected(path: String) -> void:
+	var document := GLTFDocument.new()
+	var state := GLTFState.new()
+	var error := document.append_from_file(path, state, 0, path.get_base_dir())
+	if error != OK:
+		_set_status("No se pudo cargar el GLB: " + error_string(error))
+		return
+	var scene := document.generate_scene(state)
+	if scene == null:
+		_set_status("El GLB no pudo generar una escena.")
+		return
+	var world := model_viewport.get_node("PreviewWorld")
+	for child in world.get_children():
+		if child is Node3D and child.name not in ["PreviewCamera", "PreviewLight", "WorldEnvironment"]:
+			child.queue_free()
+	world.add_child(scene)
+	var bounds := _find_model_bounds(scene)
+	if bounds.size.length() > 0.001:
+		var center := bounds.position + bounds.size * 0.5
+		var radius := maxf(bounds.size.length() * 0.5, 0.5)
+		var camera := world.get_node("PreviewCamera") as Camera3D
+		# Aim at the vertical midpoint of the complete model, not its origin.
+		camera_target = Vector3(center.x, bounds.position.y + bounds.size.y * 0.5, center.z)
+		camera_distance = maxf(radius * 3.5, 3.5)
+		camera_yaw = 0.0
+		camera_pitch = 0.25
+		_update_model_camera()
+	var skeletons: Array[String] = []
+	_collect_skeletons(scene, skeletons)
+	var skeleton := _find_first_skeleton(scene)
+	var mapped_count := 0
+	if skeleton:
+		mapped_count = SkeletonMapperClass.new().build_mapping(skeleton).size()
+	if model_status:
+		model_status.hide()
+	_set_status("Modelo cargado: %s — Skeleton3D: %d — huesos mapeados: %d" % [path.get_file(), skeletons.size(), mapped_count])
+
+func _collect_skeletons(node: Node, result: Array[String]) -> void:
+	if node is Skeleton3D:
+		result.append(node.name + " (%d bones)" % node.get_bone_count())
+	for child in node.get_children():
+		_collect_skeletons(child, result)
+
+func _find_first_skeleton(node: Node) -> Skeleton3D:
+	if node is Skeleton3D:
+		return node
+	for child in node.get_children():
+		var found := _find_first_skeleton(child)
+		if found:
+			return found
+	return null
+
+func _find_model_bounds(node: Node) -> AABB:
+	var bounds := AABB()
+	var found := false
+	if node is MeshInstance3D:
+		bounds = node.global_transform * node.get_aabb()
+		found = true
+	for child in node.get_children():
+		var child_bounds := _find_model_bounds(child)
+		if child_bounds.size.length() > 0.001:
+			bounds = child_bounds if not found else bounds.merge(child_bounds)
+			found = true
+	return bounds if found else AABB()
 
 func _generate_animation() -> void:
 	if keyframes.size() < 2:
