@@ -15,7 +15,8 @@ def main() -> int:
     parser.add_argument("--input", required=True, help="Input motion JSON")
     parser.add_argument("--output", required=True, help="Output motion JSON")
     args = parser.parse_args()
-    data = json.loads(Path(args.input).read_text(encoding="utf-8"))
+    # utf-8-sig also accepts regular UTF-8 and JSON files created by Windows PowerShell.
+    data = json.loads(Path(args.input).read_text(encoding="utf-8-sig"))
     data["schema_version"] = 1
     data["model"] = "STAR_NEUTRAL"
     data["coordinate_system"] = "godot_y_up_right_handed"
@@ -30,4 +31,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
