@@ -26,7 +26,9 @@ func _build_ui() -> void:
 		margin.add_theme_constant_override(property, 18)
 	add_child(margin)
 	var columns := HBoxContainer.new()
-	columns.add_theme_constant_override("separation", 14)
+	columns.add_theme_constant_override("separation", 8)
+	columns.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	columns.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	margin.add_child(columns)
 	columns.add_child(_make_video_panel())
 	columns.add_child(_make_model_panel())
@@ -40,12 +42,12 @@ func _build_ui() -> void:
 
 func _make_video_panel() -> Control:
 	var panel := _panel()
-	panel.size_flags_stretch_ratio = 1.0
+	panel.size_flags_stretch_ratio = 38.0
 	var root := _column(panel)
 	root.add_child(_heading("VIDEO"))
 	var preview := ColorRect.new()
 	preview.color = Color("090d15")
-	preview.custom_minimum_size = Vector2(0, 360)
+	preview.custom_minimum_size = Vector2(0, 0)
 	preview.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	var preview_text := Label.new()
 	preview_text.text = "No video loaded\n\nUse Load Video to select a source"
@@ -80,12 +82,12 @@ func _make_video_panel() -> Control:
 
 func _make_model_panel() -> Control:
 	var panel := _panel()
-	panel.size_flags_stretch_ratio = 1.0
+	panel.size_flags_stretch_ratio = 38.0
 	var root := _column(panel)
 	root.add_child(_heading("3D MODEL / ANIMATION"))
 	var preview := ColorRect.new()
 	preview.color = Color("090d15")
-	preview.custom_minimum_size = Vector2(0, 360)
+	preview.custom_minimum_size = Vector2(0, 0)
 	preview.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	var text := Label.new()
 	text.text = "STAR NEUTRAL PREVIEW\n\nLoad a humanoid GLB to preview retargeted motion"
@@ -105,7 +107,7 @@ func _make_model_panel() -> Control:
 func _make_options_panel() -> Control:
 	var panel := _panel()
 	panel.custom_minimum_size.x = 300
-	panel.size_flags_horizontal = Control.SIZE_SHRINK_END
+	panel.size_flags_stretch_ratio = 24.0
 	var root := _column(panel)
 	root.add_child(_heading("OPTIONS"))
 	_add_button(root, "Load Video", _open_video)
@@ -123,6 +125,8 @@ func _make_options_panel() -> Control:
 
 func _panel() -> PanelContainer:
 	var panel := PanelContainer.new()
+	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	panel.add_theme_stylebox_override("panel", _box(PANEL_COLOR, 10))
 	return panel
 

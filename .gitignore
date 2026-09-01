@@ -7,5 +7,7 @@ local_config/
 exports/
 processing/
 models/
+star_1_1/
+test_data/
 *.import
 *.tmp

@@ -10,6 +10,16 @@ import os
 from pathlib import Path
 
 
+def neutral_model_path() -> Path:
+    configured = os.environ.get("STAR_MODEL_PATH", "")
+    if configured:
+        path = Path(configured)
+        if not path.is_absolute():
+            path = Path(__file__).resolve().parent.parent / path
+        return path
+    return Path(__file__).resolve().parent.parent / "star_1_1" / "neutral"
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Process selected frames with STAR Neutral")
     parser.add_argument("--input", required=True, help="Input motion JSON")
@@ -20,10 +30,12 @@ def main() -> int:
     data["schema_version"] = 1
     data["model"] = "STAR_NEUTRAL"
     data["coordinate_system"] = "godot_y_up_right_handed"
+    model_dir = neutral_model_path()
+    data["star_model_available"] = (model_dir / "model.npz").is_file() if model_dir.is_dir() else model_dir.is_file()
     data.setdefault("keyframes", [])
     for keyframe in data["keyframes"]:
         keyframe.setdefault("status", "pending")
-        keyframe.setdefault("error", "STAR fitting adapter not configured")
+        keyframe.setdefault("error", "STAR fitting adapter not configured; neutral model detected" if data["star_model_available"] else "STAR Neutral model not found")
     Path(args.output).parent.mkdir(parents=True, exist_ok=True)
     Path(args.output).write_text(json.dumps(data, indent=2), encoding="utf-8")
     return 0
