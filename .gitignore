@@ -1,0 +1,11 @@
+.godot/
+.venv/
+__pycache__/
+*.pyc
+.env
+local_config/
+exports/
+processing/
+models/
+*.import
+*.tmp

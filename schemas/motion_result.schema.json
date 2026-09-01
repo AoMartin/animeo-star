@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Animeo STAR Motion Result",
+  "type": "object",
+  "required": ["schema_version", "source_video", "keyframes"],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "source_video": {"type": "string"},
+    "model": {"type": "string", "const": "STAR_NEUTRAL"},
+    "coordinate_system": {"type": "string", "const": "godot_y_up_right_handed"},
+    "keyframes": {"type": "array", "items": {"$ref": "#/$defs/keyframe"}}
+  },
+  "$defs": {
+    "keyframe": {
+      "type": "object",
+      "required": ["frame_index", "timestamp", "status"],
+      "properties": {
+        "frame_index": {"type": "integer", "minimum": 0},
+        "timestamp": {"type": "number", "minimum": 0},
+        "status": {"type": "string", "enum": ["pending", "processed", "failed"]},
+        "confidence": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+        "star_pose": {"type": ["array", "null"], "items": {"type": "number"}},
+        "star_shape": {"type": ["array", "null"], "items": {"type": "number"}},
+        "root_translation": {"type": ["array", "null"], "items": {"type": "number"}},
+        "error": {"type": ["string", "null"]}
+      }
+    }
+  }
+}
+
