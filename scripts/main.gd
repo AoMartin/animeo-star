@@ -9,15 +9,32 @@ var video_info: Label
 var frame_label: Label
 var video_slider: HSlider
 var keyframe_list: ItemList
+var video_preview: TextureRect
+var video_placeholder: Label
 var source_path := ""
 var frame_index := 0
 var frame_rate := 30.0
 var frame_count := 300
 var keyframes: Dictionary = {}
 var file_dialog: FileDialog
+var local_env: Dictionary = {}
 
 func _ready() -> void:
+	_load_local_env()
 	_build_ui()
+
+func _load_local_env() -> void:
+	var file := FileAccess.open("res://.env", FileAccess.READ)
+	if file == null:
+		return
+	for line in file.get_as_text().split("\n"):
+		var parts := line.strip_edges().split("=", true, 1)
+		if parts.size() == 2 and not parts[0].begins_with("#"):
+			local_env[parts[0].strip_edges()] = parts[1].strip_edges()
+
+func _config_value(name: String) -> String:
+	var system_value := OS.get_environment(name)
+	return system_value if not system_value.is_empty() else str(local_env.get(name, ""))
 
 func _build_ui() -> void:
 	var margin := MarginContainer.new()
@@ -49,12 +66,17 @@ func _make_video_panel() -> Control:
 	preview.color = Color("090d15")
 	preview.custom_minimum_size = Vector2(0, 0)
 	preview.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	var preview_text := Label.new()
-	preview_text.text = "No video loaded\n\nUse Load Video to select a source"
-	preview_text.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	preview_text.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	preview_text.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	preview.add_child(preview_text)
+	video_preview = TextureRect.new()
+	video_preview.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	video_preview.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	video_preview.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	preview.add_child(video_preview)
+	video_placeholder = Label.new()
+	video_placeholder.text = "No video loaded\n\nUse Load Video to select a source"
+	video_placeholder.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	video_placeholder.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	video_placeholder.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	preview.add_child(video_placeholder)
 	root.add_child(preview)
 	var controls := VBoxContainer.new()
 	root.add_child(controls)
@@ -155,11 +177,15 @@ func _open_video() -> void:
 	file_dialog.popup_centered_ratio(0.75)
 
 func _on_video_selected(path: String) -> void:
+	if not FileAccess.file_exists(path):
+		_set_status("El archivo seleccionado no existe: " + path)
+		return
 	source_path = path
 	frame_index = 0
 	keyframes.clear()
+	_set_status("Extrayendo frames de " + path.get_file() + "...")
+	_extract_video_frames(path)
 	_update_video_state()
-	_set_status("Video seleccionado. Marca los frames que quieres procesar.")
 
 func _previous_frame() -> void:
 	_set_frame(frame_index - 1)
@@ -191,12 +217,46 @@ func _update_video_state() -> void:
 	frame_label.text = "Frame: %d / %d    Time: %.3f s    Keyframes: %d" % [frame_index, frame_count - 1, frame_index / frame_rate, keyframes.size()]
 	if video_info:
 		video_info.text = source_path if source_path else "No source selected (timeline de prueba disponible)"
+	_refresh_video_frame()
 	if keyframe_list:
 		keyframe_list.clear()
 		var frames := keyframes.keys()
 		frames.sort()
 		for frame in frames:
 			keyframe_list.add_item("Frame %d  —  %.3f s  —  %s" % [frame, frame / frame_rate, keyframes[frame].get("status", "pending")])
+
+func _extract_video_frames(path: String) -> void:
+	var cache_dir := ProjectSettings.globalize_path(DATA_DIR + "/frames")
+	var metadata := ProjectSettings.globalize_path(DATA_DIR + "/video_metadata.json")
+	DirAccess.make_dir_recursive_absolute(cache_dir)
+	var python := _config_value("PYTHON_EXECUTABLE_PATH")
+	if python.is_empty():
+		python = "python"
+	var extractor := ProjectSettings.globalize_path("res://worker/extract_frames.py")
+	var output: Array = []
+	var exit_code := OS.execute(python, [extractor, "--video", path, "--out-dir", cache_dir, "--metadata", metadata], output, true)
+	if exit_code != 0 or not FileAccess.file_exists(metadata):
+		_set_status("No se pudieron extraer frames. Configura PYTHON_EXECUTABLE_PATH con un Python que tenga opencv-python.")
+		return
+	var metadata_file := FileAccess.open(metadata, FileAccess.READ)
+	var info = JSON.parse_string(metadata_file.get_as_text()) if metadata_file else {}
+	if info is Dictionary:
+		frame_rate = maxf(float(info.get("fps", 30.0)), 1.0)
+		frame_count = maxi(int(info.get("frame_count", 1)), 1)
+		video_slider.max_value = frame_count - 1
+		if video_placeholder:
+			video_placeholder.hide()
+	_set_status("Video cargado: %d frames a %.2f FPS." % [frame_count, frame_rate])
+
+func _refresh_video_frame() -> void:
+	if not video_preview or source_path.is_empty():
+		return
+	var frame_path := ProjectSettings.globalize_path(DATA_DIR + "/frames/frame_%06d.jpg" % frame_index)
+	if not FileAccess.file_exists(frame_path):
+		return
+	var image := Image.load_from_file(frame_path)
+	if image:
+		video_preview.texture = ImageTexture.create_from_image(image)
 
 func _process_keyframes() -> void:
 	if keyframes.is_empty():
@@ -209,7 +269,7 @@ func _process_keyframes() -> void:
 	var file := FileAccess.open(input_path, FileAccess.WRITE)
 	file.store_string(JSON.stringify(payload, "  "))
 	file.close()
-	var python := OS.get_environment("PYTHON_EXECUTABLE_PATH")
+	var python := _config_value("PYTHON_EXECUTABLE_PATH")
 	if python.is_empty():
 		python = "python"
 	var worker := ProjectSettings.globalize_path("res://worker/cli.py")
